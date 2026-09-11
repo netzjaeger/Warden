@@ -1,0 +1,12 @@
+*.iml
+.gradle
+local.properties
+.idea
+.DS_Store
+build
+*.jks
+*.keystore
+gradlew
+gradlew.bat
+gradle/wrapper/
+build.sh

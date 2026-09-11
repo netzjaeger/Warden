@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-feature android:name="android.software.device_admin" android:required="true" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+
+    <application
+        android:name=".MyApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:label="@string/app_name"
+        android:testOnly="false"
+        android:directBootAware="true"
+        tools:targetApi="36"
+        tools:ignore="MissingApplicationIcon">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".Receiver"
+            android:description="@string/app_name"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".PackageChangeReceiver"
+            android:exported="false">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".WardenDeviceAdminService"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_SERVICE" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

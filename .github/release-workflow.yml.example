@@ -1,0 +1,122 @@
+name: Warden Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump for the Android version name'
+        required: false
+        type: choice
+        options: [minor, patch, major]
+        default: minor
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Check out Warden source (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: netzjaeger/Warden
+          path: warden-src
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Determine next version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BUMP="${{ inputs.version_bump }}"
+          BUMP="${BUMP:-minor}"
+
+          LATEST_TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 \
+            --json tagName --jq '.[0].tagName' 2>/dev/null || true)
+
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" == "null" ]; then
+            MAJOR=1; MINOR=0; PATCH=0
+          else
+            V="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$V"
+            MAJOR=${MAJOR:-1}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+              *)     MINOR=$((MINOR + 1)); PATCH=0 ;;
+            esac
+          fi
+
+          V_NAME="${MAJOR}.${MINOR}.${PATCH}"
+          V_CODE="${{ github.run_number }}"
+
+          echo "VERSION_NAME=$V_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$V_CODE" >> "$GITHUB_ENV"
+          echo "TAG_NAME=v$V_NAME" >> "$GITHUB_ENV"
+
+          echo "Building Warden $V_NAME (code $V_CODE); previous tag was ${LATEST_TAG:-none}, bump=$BUMP"
+
+      - name: Load build configuration
+        env:
+          BUILD_REPO_DIR: ${{ github.workspace }}
+        run: warden-src/.github/scripts/load-build-config.sh
+
+      - name: Locate project and decode keystore
+        run: |
+          APP_DIR=$(find warden-src -type d -name "app" -print -quit)
+          echo "APP_PATH=$APP_DIR" >> "$GITHUB_ENV"
+          echo "ROOT_PATH=$(dirname "$APP_DIR")" >> "$GITHUB_ENV"
+
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode - > "$APP_DIR/warden-release-key.keystore"
+
+      - name: Build release APK
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          cd "${{ env.ROOT_PATH }}"
+          AUTH_KEY_PATH=$(realpath app/warden-release-key.keystore)
+
+          gradle assembleRelease \
+            --no-build-cache \
+            --no-configuration-cache \
+            -PAppVersionCode="${{ env.VERSION_CODE }}" \
+            -PAppVersionName="${{ env.VERSION_NAME }}" \
+            -PStoreFile="$AUTH_KEY_PATH" \
+            -PWardenStorePassword="$STORE_PASSWORD" \
+            -PWardenKeyPassword="$KEY_PASSWORD" \
+            -PWardenKeyAlias="$KEY_ALIAS"
+
+      - name: Collect and rename artifact
+        run: |
+          APK_PATH=$(find warden-src -name "app-release.apk" -print -quit)
+          mv "$APK_PATH" "Warden-${{ env.TAG_NAME }}-release.apk"
+
+      - name: Shred decoded keystore
+        if: always()
+        run: shred -u "${{ env.APP_PATH }}/warden-release-key.keystore" 2>/dev/null || rm -f "${{ env.APP_PATH }}/warden-release-key.keystore"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Warden ${{ env.TAG_NAME }}
+          files: Warden-${{ env.TAG_NAME }}-release.apk
+          generate_release_notes: false
+          body: "Automated release build for Warden ${{ env.TAG_NAME }}."
